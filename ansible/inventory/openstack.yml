@@ -1,0 +1,13 @@
+# Dynamic inventory. Export OS_AUTH_URL, OS_USERNAME, OS_PASSWORD,
+# OS_PROJECT_NAME, OS_USER_DOMAIN_NAME, OS_PROJECT_DOMAIN_NAME first.
+# Tag each instance with metadata k8s_role=master or k8s_role=worker
+# so the groups below match site.yml.
+plugin: openstack.cloud.inventory
+expand_hostvars: true
+fail_on_errors: true
+keyed_groups:
+  - key: openstack.metadata.k8s_role
+    separator: ""
+compose:
+  ansible_host: openstack.access_ipv4
+  ansible_user: "'ubuntu'"

@@ -1,0 +1,18 @@
+# Copy to hosts.yml and set the addresses Horizon gave the three instances.
+all:
+  vars:
+    ansible_user: ubuntu
+    ansible_python_interpreter: /usr/bin/python3
+    k8s_version: "1.32"
+    pod_network_cidr: "10.244.0.0/16"
+  children:
+    master:
+      hosts:
+        k8s-master:
+          ansible_host: 172.16.99.50
+    workers:
+      hosts:
+        k8s-worker1:
+          ansible_host: 172.16.99.51
+        k8s-worker2:
+          ansible_host: 172.16.99.52

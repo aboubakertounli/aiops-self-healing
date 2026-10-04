@@ -1,0 +1,38 @@
+---
+- name: Check for an existing control plane
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+  register: admin_conf
+
+- name: Initialise the control plane with Docker
+  ansible.builtin.command: >
+    kubeadm init
+    --pod-network-cidr={{ pod_network_cidr }}
+    --cri-socket=unix:///var/run/cri-dockerd.sock
+  when: not admin_conf.stat.exists
+
+- name: Create the ubuntu kubeconfig directory
+  ansible.builtin.file:
+    path: /home/ubuntu/.kube
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: "0755"
+
+- name: Install the admin kubeconfig for ubuntu
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: /home/ubuntu/.kube/config
+    remote_src: true
+    owner: ubuntu
+    group: ubuntu
+    mode: "0600"
+
+- name: Create a join command
+  ansible.builtin.command: kubeadm token create --print-join-command
+  register: join_command
+  changed_when: false
+
+- name: Share the join command with the workers
+  ansible.builtin.set_fact:
+    kubeadm_join_command: "{{ join_command.stdout }}"

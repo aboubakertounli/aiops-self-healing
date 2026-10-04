@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: aiops-agent
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      chat:
+        options:
+          model: ${OPENAI_MODEL:gpt-4o}
+    mcp:
+      client:
+        type: SYNC
+        sse:
+          connections:
+            docker:
+              url: ${MCP_DOCKER_URL:http://localhost:8001}
+              sse-endpoint: /sse
+            metrics:
+              url: ${MCP_METRICS_URL:http://localhost:8002}
+              sse-endpoint: /sse
+            infra:
+              url: ${MCP_INFRA_URL:http://localhost:8003}
+              sse-endpoint: /sse
+
+server:
+  port: 8080

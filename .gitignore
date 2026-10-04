@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.idea/
+.vscode/
+target/
+node_modules/
+dist/
+.angular/
+*.log
+.env
+kubeconfig
+*.kubeconfig
+join-command.sh
