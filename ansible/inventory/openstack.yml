@@ -1,13 +1,23 @@
-# Dynamic inventory. Export OS_AUTH_URL, OS_USERNAME, OS_PASSWORD,
-# OS_PROJECT_NAME, OS_USER_DOMAIN_NAME, OS_PROJECT_DOMAIN_NAME first.
-# Tag each instance with metadata k8s_role=master or k8s_role=worker
-# so the groups below match site.yml.
+# Asks Nova which instances exist, then builds the master and workers groups
+# used by site.yml. Install the collection first:
+#   ansible-galaxy collection install -r requirements.yml
+#
+# Export OS_AUTH_URL, OS_USERNAME, OS_PASSWORD, OS_PROJECT_NAME,
+# OS_USER_DOMAIN_NAME and OS_PROJECT_DOMAIN_NAME.
+# OS_AUTH_URL is the Keystone URL. With Kolla that is the internal VIP,
+# not a fixed address chosen on the controller.
+#
+# When launching each instance, set the metadata key k8s_role:
+#   master   -> group master
+#   worker   -> group workers
+#   workers  -> group workers
 plugin: openstack.cloud.inventory
 expand_hostvars: true
 fail_on_errors: true
-keyed_groups:
-  - key: openstack.metadata.k8s_role
-    separator: ""
+groups:
+  master: openstack.metadata.k8s_role | default('') == 'master'
+  workers: openstack.metadata.k8s_role | default('') in ['worker', 'workers']
 compose:
-  ansible_host: openstack.access_ipv4
+  ansible_host: openstack.access_ipv4 | default(openstack.private_v4, true) | default(openstack.public_v4, true)
   ansible_user: "'ubuntu'"
+  ansible_python_interpreter: "'/usr/bin/python3'"
