@@ -1,6 +1,6 @@
 # AIOps self-healing platform
 
-Code for the Kubernetes bootstrap, the GitOps manifests, the three MCP servers, and the chat agent. OpenStack is installed from the CentOS multinode guide. It is not in this repository.
+Code for the OpenStack install, the Kubernetes bootstrap, the GitOps manifests, the three MCP servers, and the chat agent. OpenStack is installed with Kolla Ansible on two Ubuntu nodes. Kubernetes is a separate playbook, run after the three instances exist.
 
 The cluster is three Ubuntu VMs on the OpenStack compute host:
 
@@ -25,6 +25,7 @@ The Docker MCP server is the only process here that restarts a container. The me
 
 | Folder | Role |
 |---|---|
+| `kolla/` | Kolla Ansible inventory and `globals.yml` for the controller and the compute node |
 | `ansible/` | SSH playbook that installs Kubernetes on the three VMs |
 | `gitops/` | Desired state Flux applies to the cluster |
 | `mcp-server-docker/` | Container list, stats, logs, forecast, restart. Talks to `/var/run/docker.sock` |
@@ -56,16 +57,32 @@ cd ansible
 ansible-playbook -i inventory/hosts.yml site.yml
 ```
 
-Done when `kubectl get nodes` on the master shows three nodes `Ready`.
+Done when `kubectl get nodes` on the master shows three nodes `Ready`. `inventory/openstack.yml` is the other inventory: the OpenStack plugin discovers the VMs from Nova instead of a static file. Set `OS_AUTH_URL` to the Kolla VIP (`http://10.0.0.10:5000/v3` unless you changed it), plus `OS_USERNAME`, `OS_PASSWORD`, and `OS_PROJECT_NAME`. Tag the master instance with metadata `k8s_role=master` and the two workers with `k8s_role=workers`, so the group names match `site.yml`.
 
-`inventory/openstack.yml` is the other way to build that list. It asks Nova for the instances when the playbook starts, so a new address does not have to be copied into a file. Install the plugin once, then export the OpenStack credentials (`OS_AUTH_URL`, `OS_USERNAME`, `OS_PASSWORD`, `OS_PROJECT_NAME`, `OS_USER_DOMAIN_NAME`, `OS_PROJECT_DOMAIN_NAME`). `OS_AUTH_URL` is the Keystone URL. With Kolla it is the internal VIP.
+## Kolla
+
+`kolla/` installs OpenStack. It does not create the Kubernetes instances and it does not run `site.yml`.
+
+Two Ubuntu 24.04 nodes, each with two NICs. The management NIC keeps its address (`10.0.0.11` on the controller, `10.0.0.31` on the compute). The provider NIC has no address. Kolla attaches that second NIC to `br-ex`. The names in `kolla/globals.yml` (`eth0`, `eth1`) have to be replaced with the names from `ip a` if they differ. `kolla_internal_vip_address` is a free address on `10.0.0.0/24`. Horizon and Keystone listen on that VIP, not on `10.0.0.11`.
+
+From the machine that can SSH to both nodes as `ubuntu`:
 
 ```bash
-ansible-galaxy collection install -r requirements.yml
-ansible-playbook -i inventory/openstack.yml site.yml
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r kolla/requirements.txt
+sudo mkdir -p /etc/kolla
+sudo cp kolla/globals.yml /etc/kolla/globals.yml
+sudo chown -R "$USER" /etc/kolla
+kolla-genpwd
+kolla-ansible bootstrap-servers -i kolla/inventory/multinode
+kolla-ansible prechecks -i kolla/inventory/multinode
+kolla-ansible deploy -i kolla/inventory/multinode
+kolla-ansible post-deploy -i kolla/inventory/multinode
+PROVIDER_GATEWAY=172.16.99.1 bash kolla/init-provider-network.sh
 ```
 
-Each instance needs metadata `k8s_role`. The value `master` fills the `master` group. The value `worker` or `workers` fills the `workers` group that `site.yml` uses. Set that key in Horizon when you launch the instance.
+`kolla-genpwd` writes `/etc/kolla/passwords.yml`. That file stays on the operator machine. Then open Horizon at `http://10.0.0.10` and launch the three Ubuntu instances on the `provider` network. Set `PROVIDER_GATEWAY` to the router that already exists on `172.16.99.0/24`.
 
 ## GitOps
 
@@ -93,8 +110,8 @@ Train Ticket is not here. It is the separate project [FudanSELab/train-ticket](h
 
 Each step needs the one before it.
 
-1. **OpenStack.** Controller and compute on CentOS, Horizon at `http://10.0.0.11/dashboard`.
-2. **Instances.** From Horizon, launch `K8s-Master`, `K8s-Worker1`, and `K8s-Worker2` from an Ubuntu 24.04 image.
+1. **OpenStack.** Kolla on the two Ubuntu nodes, then the provider network. Horizon at `http://10.0.0.10`.
+2. **Instances.** From Horizon, launch `K8s-Master`, `K8s-Worker1`, and `K8s-Worker2` on the `provider` network from an Ubuntu 24.04 image.
 3. **Ansible.** Fill `hosts.yml` and run the playbook above.
 4. **Images.** From the repo root, build and push:
 

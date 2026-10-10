@@ -1,0 +1,25 @@
+---
+# Copied to /etc/kolla/globals.yml before deploy.
+# Edit the two interface names so they match the nodes (ip a).
+
+kolla_base_distro: "ubuntu"
+openstack_release: "2025.1"
+
+# Unused address on the management network. Horizon and Keystone listen here.
+kolla_internal_vip_address: "10.0.0.10"
+
+# NIC that already has 10.0.0.11 on the controller and 10.0.0.31 on the compute.
+network_interface: "eth0"
+
+# Second NIC. Leave it without an IP. Kolla moves it into br-ex.
+# Both nodes use this NIC for the provider network 172.16.99.0/24.
+neutron_external_interface: "eth1"
+enable_neutron_provider_networks: "yes"
+
+# Services this cloud actually uses are on by default: Keystone, Glance,
+# Nova, Neutron, Horizon, Placement, MariaDB, RabbitMQ, Memcached.
+enable_cinder: "no"
+enable_heat: "no"
+enable_barbican: "no"
+enable_ironic: "no"
+enable_magnum: "no"

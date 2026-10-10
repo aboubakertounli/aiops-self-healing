@@ -12,3 +12,5 @@ dist/
 kubeconfig
 *.kubeconfig
 join-command.sh
+kolla/passwords.yml
+/etc/kolla/
