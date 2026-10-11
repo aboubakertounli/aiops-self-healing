@@ -16,10 +16,10 @@ Two namespaces hold what this repo deploys:
 
 | Namespace | Contents |
 |---|---|
-| `aiops` | Docker MCP server (one pod per node, Docker socket mounted), metrics MCP server, infra MCP server, Spring agent, Fluent Bit |
+| `aiops` | Metrics MCP server, infra MCP server, and the Spring agent. All three run on the control-plane node, separate from `kube-system`. |
 | `monitoring` | Prometheus and Grafana, from the `kube-prometheus-stack` chart |
 
-The Docker MCP server is the only process here that restarts a container. The metrics server and the infra server only read. A restart happens on the worker whose pod received the call. The tool reply includes `node` so you can see which worker that was.
+The workers run the application pods. The infra MCP server can delete one application pod. containerd starts the replacement. It does not create a node and it does not edit a manifest. Fluent Bit still runs on every node, including the workers, because that is how the logs are collected.
 
 ## Folders
 
@@ -28,12 +28,11 @@ The Docker MCP server is the only process here that restarts a container. The me
 | `kolla/` | Kolla Ansible inventory and `globals.yml` for the controller and the compute node |
 | `ansible/` | SSH playbook that installs Kubernetes on the three VMs |
 | `gitops/` | Desired state Flux applies to the cluster |
-| `mcp-server-docker/` | Container list, stats, logs, forecast, restart. Talks to `/var/run/docker.sock` |
 | `mcp-server-metrics/` | PromQL queries and a memory forecast |
 | `mcp-server-infra/` | Kubernetes and OpenStack reads, plus pod-log search |
 | `agent-backend/` | Spring Boot. `POST /api/chat` runs the model and the MCP tools |
 | `agent-frontend/index.html` | Chat page. Posts to `/api/chat` |
-| `shared/` | `forecast.py`, the straight-line memory forecast used by the Docker server and the metrics server |
+| `shared/` | `forecast.py`, the straight-line memory forecast used by the metrics server |
 | `tests/` | Checks that forecast: a steady climb reaches the limit, a flat line does not |
 
 `shared/` exists so the two servers do not each keep their own copy of the formula. `tests/` does not start a cluster. The GitLab job `test` runs it with `python -m unittest discover -s tests`.
@@ -46,7 +45,7 @@ Copy `ansible/inventory/hosts.yml.example` to `ansible/inventory/hosts.yml` and 
 
 `site.yml` has three plays:
 
-1. On the master, roles `common` and `kubernetes_master`. `common` turns off swap, loads `overlay` and `br_netfilter`, installs Docker, cri-dockerd, kubeadm, kubelet, and kubectl. cri-dockerd is what lets kubelet start pods through Docker, so `/var/run/docker.sock` sees those containers. `kubernetes_master` runs `kubeadm init` and saves the join command.
+1. On the master, roles `common` and `kubernetes_master`. `common` turns off swap, loads `overlay` and `br_netfilter`, installs containerd, kubeadm, kubelet, and kubectl. containerd is the runtime kubeadm uses. `kubernetes_master` runs `kubeadm init` and saves the join command.
 2. On the master, role `kubernetes_network` installs Flannel. Pods need that network before the workers are useful.
 3. On the workers, `common` again, then `kubernetes_worker`, which runs the join command from the master.
 
@@ -91,12 +90,11 @@ PROVIDER_GATEWAY=172.16.99.1 bash kolla/init-provider-network.sh
 `kustomization.yaml` is the index of that directory. It names the YAML files to include:
 
 - `namespace.yaml` creates `aiops` and `monitoring`, plus read access for the infra MCP server
-- `mcp-docker.yaml` is the DaemonSet that mounts the Docker socket
-- `agent.yaml` is the metrics server, the infra server, and the Spring agent
+- `agent.yaml` is the metrics server, the infra server, and the Spring agent, scheduled on the control-plane node
 - `fluent-bit.yaml` tails container logs on every node
 - `monitoring.yaml` is the Prometheus and Grafana chart
 
-The Deployments use short image names (`mcp-docker`, `aiops-agent`). The `images:` block in `kustomization.yaml` rewrites them to `docker.io/aboubakertounli/<name>:dev` before anything is applied. Change `newTag` when you push a new image.
+The Deployments use short image names (`mcp-metrics`, `aiops-agent`). The `images:` block in `kustomization.yaml` rewrites them to `docker.io/aboubakertounli/<name>:dev` before anything is applied. Change `newTag` when you push a new image.
 
 Grafana is not a separate manifest. `monitoring.yaml` is a Flux HelmRelease for `kube-prometheus-stack`. That chart installs Prometheus and Grafana into `monitoring`. The password in the file is `admin`. After Flux has applied it, the service name is `kube-prometheus-stack-grafana`.
 
@@ -105,6 +103,20 @@ Grafana is not a separate manifest. `monitoring.yaml` is a Flux HelmRelease for 
 Train Ticket is not here. It is the separate project [FudanSELab/train-ticket](https://github.com/FudanSELab/train-ticket). This repo also has no DevSecOps pipeline for it: no SonarQube, Maven build of those services, OWASP check, or Trivy scan of those images.
 
 `.gitlab-ci.yml` only does two things for this platform: run `tests/`, then build and push the three MCP images and the agent image. It does not deploy Train Ticket and it does not update `gitops/`.
+
+## Deploy from the CentOS server
+
+The CentOS Stream 9 machine is the hypervisor. Kolla 2025.1 installs OpenStack on Ubuntu 24.04 guests, and the Kubernetes playbook also targets Ubuntu. Do not install kubeadm on the CentOS host.
+
+1. On CentOS, install KVM and allow the compute guest to run VMs: `dnf install -y qemu-kvm libvirt virt-install`, then `systemctl enable --now libvirtd`.
+2. Create the two networks. Management is `10.0.0.0/24`. The provider bridge is attached to the physical NIC and uses `172.16.99.0/24`.
+3. Create two Ubuntu 24.04 guests, each with one NIC on each network. Controller `10.0.0.11`. Compute `10.0.0.31`. Leave the provider NIC without an address. Enable nested virtualization on the compute guest.
+4. From a machine that can SSH to both guests, run the Kolla commands in the section above. Edit `eth0` and `eth1` in `kolla/globals.yml` first if `ip a` shows other names.
+5. Open Horizon at `http://10.0.0.10`. Launch `K8s-Master`, `K8s-Worker1`, and `K8s-Worker2` from an Ubuntu 24.04 image on the `provider` network. Tag them `k8s_role=master` or `k8s_role=workers`.
+6. Copy `ansible/inventory/hosts.yml.example` to `hosts.yml`, set the three addresses, and run `ansible-playbook -i inventory/hosts.yml site.yml`.
+7. Build and push the three images listed below, bootstrap Flux, then create the `llm` secret.
+
+Workers receive Train Ticket only. The agent, the metrics server, and the infra server stay in the namespace `aiops` on `K8s-Master`.
 
 ## Execution order
 
@@ -116,11 +128,9 @@ Each step needs the one before it.
 4. **Images.** From the repo root, build and push:
 
    ```bash
-   docker build -f mcp-server-docker/Dockerfile -t docker.io/aboubakertounli/mcp-docker:dev .
    docker build -f mcp-server-metrics/Dockerfile -t docker.io/aboubakertounli/mcp-metrics:dev .
    docker build -f mcp-server-infra/Dockerfile -t docker.io/aboubakertounli/mcp-infra:dev .
    docker build -f agent-backend/Dockerfile -t docker.io/aboubakertounli/aiops-agent:dev .
-   docker push docker.io/aboubakertounli/mcp-docker:dev
    docker push docker.io/aboubakertounli/mcp-metrics:dev
    docker push docker.io/aboubakertounli/mcp-infra:dev
    docker push docker.io/aboubakertounli/aiops-agent:dev

@@ -1,4 +1,8 @@
-"""MCP server 3: read Kubernetes, OpenStack, and pod logs. It does not change them."""
+"""MCP server for Kubernetes, OpenStack, and pod logs.
+
+The only change it can make is deleting one pod. containerd and the
+Deployment then start a new one. It does not create nodes or edit manifests.
+"""
 
 import json
 import os
@@ -168,6 +172,17 @@ def correlate_events(namespace: str, pod: str) -> str:
             "warnings": warnings,
         }
     )
+
+
+@mcp.tool()
+def restart_pod(namespace: str, pod: str) -> str:
+    """Delete one pod so its controller starts a replacement."""
+    client = _kube()
+    core = client.CoreV1Api()
+    current = core.read_namespaced_pod(pod, namespace)
+    owner = current.metadata.owner_references[0].kind if current.metadata.owner_references else None
+    core.delete_namespaced_pod(pod, namespace)
+    return json.dumps({"namespace": namespace, "pod": pod, "deleted": True, "owner": owner})
 
 
 if __name__ == "__main__":

@@ -4,11 +4,8 @@
     path: /etc/kubernetes/admin.conf
   register: admin_conf
 
-- name: Initialise the control plane with Docker
-  ansible.builtin.command: >
-    kubeadm init
-    --pod-network-cidr={{ pod_network_cidr }}
-    --cri-socket=unix:///var/run/cri-dockerd.sock
+- name: Initialise the control plane
+  ansible.builtin.command: kubeadm init --pod-network-cidr={{ pod_network_cidr }}
   when: not admin_conf.stat.exists
 
 - name: Create the ubuntu kubeconfig directory

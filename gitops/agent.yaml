@@ -13,6 +13,12 @@ spec:
       labels:
         app: mcp-metrics
     spec:
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
       containers:
         - name: mcp-metrics
           image: mcp-metrics
@@ -52,6 +58,12 @@ spec:
         app: mcp-infra
     spec:
       serviceAccountName: mcp-infra
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
       containers:
         - name: mcp-infra
           image: mcp-infra
@@ -116,6 +128,12 @@ spec:
       labels:
         app: aiops-agent
     spec:
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
       containers:
         - name: agent
           image: aiops-agent
@@ -127,8 +145,6 @@ spec:
                 secretKeyRef:
                   name: llm
                   key: OPENAI_API_KEY
-            - name: MCP_DOCKER_URL
-              value: http://mcp-docker.aiops.svc:8001
             - name: MCP_METRICS_URL
               value: http://mcp-metrics.aiops.svc:8002
             - name: MCP_INFRA_URL

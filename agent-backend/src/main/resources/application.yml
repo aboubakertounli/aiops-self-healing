@@ -12,9 +12,6 @@ spring:
         type: SYNC
         sse:
           connections:
-            docker:
-              url: ${MCP_DOCKER_URL:http://localhost:8001}
-              sse-endpoint: /sse
             metrics:
               url: ${MCP_METRICS_URL:http://localhost:8002}
               sse-endpoint: /sse

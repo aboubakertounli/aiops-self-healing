@@ -37,10 +37,10 @@
   ansible.builtin.command: sysctl --system
   changed_when: false
 
-- name: Install Docker
+- name: Install containerd
   ansible.builtin.apt:
     name:
-      - docker.io
+      - containerd
       - apt-transport-https
       - ca-certificates
       - curl
@@ -48,60 +48,29 @@
     state: present
     update_cache: true
 
-- name: Run Docker with the systemd cgroup driver
-  ansible.builtin.copy:
-    dest: /etc/docker/daemon.json
-    content: |
-      {
-        "exec-opts": ["native.cgroupdriver=systemd"]
-      }
-    mode: "0644"
-  notify: Restart Docker
-
-- name: Enable Docker
-  ansible.builtin.systemd:
-    name: docker
-    enabled: true
-    state: started
-
-- name: Flush handlers so Docker is up before cri-dockerd
-  ansible.builtin.meta: flush_handlers
-
-- name: Download cri-dockerd
-  ansible.builtin.get_url:
-    url: https://github.com/Mirantis/cri-dockerd/releases/download/v0.3.16/cri-dockerd-0.3.16.amd64.tgz
-    dest: /tmp/cri-dockerd.tgz
-    mode: "0644"
-
-- name: Unpack cri-dockerd
-  ansible.builtin.unarchive:
-    src: /tmp/cri-dockerd.tgz
-    dest: /tmp
-    remote_src: true
-    creates: /usr/bin/cri-dockerd
-
-- name: Install the cri-dockerd binary
-  ansible.builtin.copy:
-    src: /tmp/cri-dockerd/cri-dockerd
-    dest: /usr/bin/cri-dockerd
-    remote_src: true
+- name: Create the containerd config directory
+  ansible.builtin.file:
+    path: /etc/containerd
+    state: directory
     mode: "0755"
 
-- name: Install cri-dockerd systemd units
-  ansible.builtin.copy:
-    src: "{{ item }}"
-    dest: /etc/systemd/system/{{ item }}
-    mode: "0644"
-  loop:
-    - cri-docker.service
-    - cri-docker.socket
+- name: Write the default containerd config
+  ansible.builtin.shell: containerd config default > /etc/containerd/config.toml
+  args:
+    creates: /etc/containerd/config.toml
 
-- name: Enable cri-dockerd
+- name: Run containerd with the systemd cgroup driver
+  ansible.builtin.replace:
+    path: /etc/containerd/config.toml
+    regexp: 'SystemdCgroup = false'
+    replace: 'SystemdCgroup = true'
+  notify: Restart containerd
+
+- name: Enable containerd
   ansible.builtin.systemd:
-    name: cri-docker.socket
+    name: containerd
     enabled: true
     state: started
-    daemon_reload: true
 
 - name: Add the Kubernetes apt key
   ansible.builtin.shell: |
@@ -135,3 +104,6 @@
     - kubelet
     - kubeadm
     - kubectl
+
+- name: Apply the containerd cgroup change before kubeadm
+  ansible.builtin.meta: flush_handlers

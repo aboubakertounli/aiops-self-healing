@@ -14,11 +14,9 @@ build:
   services:
     - docker:27-dind
   script:
-    - docker build -f mcp-server-docker/Dockerfile -t "$CI_REGISTRY_IMAGE/mcp-docker:$CI_COMMIT_SHORT_SHA" .
     - docker build -f mcp-server-metrics/Dockerfile -t "$CI_REGISTRY_IMAGE/mcp-metrics:$CI_COMMIT_SHORT_SHA" .
     - docker build -f mcp-server-infra/Dockerfile -t "$CI_REGISTRY_IMAGE/mcp-infra:$CI_COMMIT_SHORT_SHA" .
     - docker build -f agent-backend/Dockerfile -t "$CI_REGISTRY_IMAGE/aiops-agent:$CI_COMMIT_SHORT_SHA" .
-    - docker push "$CI_REGISTRY_IMAGE/mcp-docker:$CI_COMMIT_SHORT_SHA"
     - docker push "$CI_REGISTRY_IMAGE/mcp-metrics:$CI_COMMIT_SHORT_SHA"
     - docker push "$CI_REGISTRY_IMAGE/mcp-infra:$CI_COMMIT_SHORT_SHA"
     - docker push "$CI_REGISTRY_IMAGE/aiops-agent:$CI_COMMIT_SHORT_SHA"
