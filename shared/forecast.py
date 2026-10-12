@@ -1,4 +1,4 @@
-"""Small forecasts shared by the Docker and Prometheus MCP servers."""
+"""Straight-line memory forecast used by the metrics MCP server."""
 
 
 def linear_forecast(samples: list[float], steps_ahead: int) -> float | None:

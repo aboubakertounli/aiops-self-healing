@@ -31,7 +31,7 @@ The workers run the application pods. The infra MCP server can delete one applic
 | `mcp-server-metrics/` | PromQL queries and a memory forecast |
 | `mcp-server-infra/` | Kubernetes and OpenStack reads, plus pod-log search |
 | `agent-backend/` | Spring Boot. `POST /api/chat` runs the model and the MCP tools |
-| `agent-frontend/index.html` | Chat page. Posts to `/api/chat` |
+| `agent-frontend/index.html` | Same console the agent serves at `/`. Shows the model, the MCP servers, the reply, and each tool call |
 | `shared/` | `forecast.py`, the straight-line memory forecast used by the metrics server |
 | `tests/` | Checks that forecast: a steady climb reaches the limit, a flat line does not |
 
@@ -114,7 +114,7 @@ The CentOS Stream 9 machine is the hypervisor. Kolla 2025.1 installs OpenStack o
 4. From a machine that can SSH to both guests, run the Kolla commands in the section above. Edit `eth0` and `eth1` in `kolla/globals.yml` first if `ip a` shows other names.
 5. Open Horizon at `http://10.0.0.10`. Launch `K8s-Master`, `K8s-Worker1`, and `K8s-Worker2` from an Ubuntu 24.04 image on the `provider` network. Tag them `k8s_role=master` or `k8s_role=workers`.
 6. Copy `ansible/inventory/hosts.yml.example` to `hosts.yml`, set the three addresses, and run `ansible-playbook -i inventory/hosts.yml site.yml`.
-7. Build and push the three images listed below, bootstrap Flux, then create the `llm` secret.
+7. Build and push the three images listed below, bootstrap Flux, then open the console. For OpenAI, create the `llm` secret. For Ollama on the CentOS GPU, set `OPENAI_BASE_URL` and `OPENAI_MODEL` in `gitops/agent.yaml`.
 
 Workers receive Train Ticket only. The agent, the metrics server, and the infra server stay in the namespace `aiops` on `K8s-Master`.
 
@@ -148,17 +148,21 @@ Each step needs the one before it.
      --personal
    ```
 
-6. **Secret.** The agent pod stays down until this exists:
+6. **Secret and model.** For OpenAI, create the key the pod reads:
 
    ```bash
    kubectl -n aiops create secret generic llm --from-literal=OPENAI_API_KEY=sk-...
    ```
 
-7. **Chat.** Port-forward the agent and open `agent-frontend/index.html`. The page calls `http://localhost:8080` unless `localStorage.agentUrl` is set.
+   For a model on your own GPU, install Ollama on the CentOS host (the machine that has the GPU) and change `OPENAI_BASE_URL` and `OPENAI_MODEL` in `gitops/agent.yaml`. Example: base URL `http://<centos-host>:11434` and model `qwen2.5:7b`. The model has to support tool calls. The secret can stay absent: the key defaults to `ollama`.
+
+7. **Console.** Port-forward the agent and open the page it serves:
 
    ```bash
    kubectl -n aiops port-forward svc/aiops-agent 8080:8080
    ```
+
+   Open `http://localhost:8080`. The page shows the model, the two MCP servers, the reply, and each tool call. `AGENT_WATCH_SECONDS` stays `0`, so the model runs when you send a message. Set it to `300` when you want the same inspection to repeat every five minutes.
 
 ## Checks
 
@@ -167,8 +171,8 @@ Each step needs the one before it.
 | Horizon | Three running instances |
 | Ansible | `kubectl get nodes` shows 3 Ready |
 | Flux | Pods in `monitoring` and `aiops` |
-| Secret | `aiops-agent` pod Running |
-| Chat | A reply that names a real container or pod |
+| Secret or Ollama URL | `aiops-agent` pod Running |
+| Console | `http://localhost:8080` shows the model and a reply that names a real pod |
 
 Grafana, once the chart is installed:
 

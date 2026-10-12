@@ -145,6 +145,13 @@ spec:
                 secretKeyRef:
                   name: llm
                   key: OPENAI_API_KEY
+                  optional: true
+            - name: OPENAI_BASE_URL
+              value: https://api.openai.com
+            - name: OPENAI_MODEL
+              value: gpt-4o
+            - name: AGENT_WATCH_SECONDS
+              value: "0"
             - name: MCP_METRICS_URL
               value: http://mcp-metrics.aiops.svc:8002
             - name: MCP_INFRA_URL

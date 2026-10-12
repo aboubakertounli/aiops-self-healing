@@ -7,7 +7,7 @@ import time
 import requests
 from fastmcp import FastMCP
 
-from shared.forecast import linear_forecast
+from shared.forecast import linear_forecast, minutes_to_limit
 
 mcp = FastMCP("metrics")
 PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://kube-prometheus-stack-prometheus.monitoring.svc:9090")
@@ -42,10 +42,22 @@ def _range_seconds(range_expr: str) -> int:
 
 @mcp.tool()
 def get_realtime_metrics(pod: str) -> str:
-    """Current CPU rate and memory bytes for a pod, from Prometheus."""
+    """Current CPU rate, memory usage, limit, and percent for one pod, from Prometheus."""
     cpu = _query(f'sum(rate(container_cpu_usage_seconds_total{{pod="{pod}"}}[5m]))')
-    memory = _query(f'sum(container_memory_usage_bytes{{pod="{pod}"}})')
-    return json.dumps({"pod": pod, "cpu": _first_value(cpu), "memory_bytes": _first_value(memory)})
+    memory = _query(f'sum(container_memory_usage_bytes{{pod="{pod}",container!="",container!="POD"}})')
+    limit = _query(f'max(container_spec_memory_limit_bytes{{pod="{pod}",container!="",container!="POD"}})')
+    used = _as_float(_first_value(memory))
+    limit_bytes = _as_float(_first_value(limit))
+    percent = round(100 * used / limit_bytes, 1) if used is not None and limit_bytes else None
+    return json.dumps(
+        {
+            "pod": pod,
+            "cpu": _first_value(cpu),
+            "memory_bytes": used,
+            "memory_limit_bytes": limit_bytes,
+            "memory_percent": percent,
+        }
+    )
 
 
 @mcp.tool()
@@ -79,6 +91,28 @@ def predict_container_state(pod: str, steps_ahead: int = 30) -> str:
 
 
 @mcp.tool()
+def predict_memory_breach(pod: str) -> str:
+    """Minutes until this pod's memory trend reaches its limit. None when the line is flat or falling."""
+    history = json.loads(get_historical_metrics(pod, "1h", "1m"))
+    samples = history["memory_bytes"]
+    limit = _as_float(
+        _first_value(
+            _query(f'max(container_spec_memory_limit_bytes{{pod="{pod}",container!="",container!="POD"}})')
+        )
+    )
+    minutes = minutes_to_limit(samples, limit or 0, 60)
+    return json.dumps(
+        {
+            "pod": pod,
+            "samples": len(samples),
+            "memory_limit_bytes": limit,
+            "minutes_to_limit": minutes,
+            "will_breach": minutes is not None,
+        }
+    )
+
+
+@mcp.tool()
 def detect_anomalies(pod: str) -> str:
     """Flag the latest memory point when it sits more than 3 standard deviations above the mean."""
     history = json.loads(get_historical_metrics(pod, "1h", "1m"))
@@ -105,6 +139,18 @@ def _first_value(result: list):
     if not result:
         return None
     return result[0].get("value", [None, None])[1]
+
+
+def _as_float(value):
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number <= 0:
+        return None
+    return number
 
 
 if __name__ == "__main__":

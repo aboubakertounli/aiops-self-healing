@@ -175,6 +175,30 @@ def correlate_events(namespace: str, pod: str) -> str:
 
 
 @mcp.tool()
+def collect_pod_diagnostics(namespace: str, pod: str) -> str:
+    """Phase, node, warning events, and recent logs for one pod."""
+    client = _kube()
+    core = client.CoreV1Api()
+    pod_obj = core.read_namespaced_pod(pod, namespace)
+    events = core.list_namespaced_event(namespace, field_selector=f"involvedObject.name={pod}")
+    warnings = [
+        {"reason": event.reason, "message": event.message}
+        for event in events.items
+        if (event.type or "").lower() == "warning"
+    ]
+    return json.dumps(
+        {
+            "pod": pod,
+            "namespace": namespace,
+            "phase": pod_obj.status.phase,
+            "node": pod_obj.spec.node_name,
+            "warnings": warnings,
+            "logs": get_pod_logs(namespace, pod, 50),
+        }
+    )
+
+
+@mcp.tool()
 def restart_pod(namespace: str, pod: str) -> str:
     """Delete one pod so its controller starts a replacement."""
     client = _kube()
