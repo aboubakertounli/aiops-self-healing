@@ -5,9 +5,18 @@ Deployment then start a new one. It does not create nodes or edit manifests.
 """
 
 import json
+import logging
 import os
+import time
 
 from fastmcp import FastMCP
+
+from policy import cooldown_remaining, namespace_allowed, parse_allowlist
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+_LAST_RESTART: dict[str, float] = {}
+_ALLOWLIST = parse_allowlist(os.environ.get("RESTART_NAMESPACES", ""))
+_COOLDOWN = int(os.environ.get("RESTART_COOLDOWN_SECONDS", "300"))
 
 mcp = FastMCP("infra")
 
@@ -201,14 +210,47 @@ def collect_pod_diagnostics(namespace: str, pod: str) -> str:
 @mcp.tool()
 def restart_pod(namespace: str, pod: str) -> str:
     """Delete one pod so its controller starts a replacement."""
+    if not namespace_allowed(namespace, _ALLOWLIST):
+        return json.dumps(
+            {
+                "namespace": namespace,
+                "pod": pod,
+                "deleted": False,
+                "reason": "namespace not allowed",
+            }
+        )
     client = _kube()
     core = client.CoreV1Api()
     current = core.read_namespaced_pod(pod, namespace)
-    owner = current.metadata.owner_references[0].kind if current.metadata.owner_references else None
+    owners = current.metadata.owner_references or []
+    if not owners:
+        return json.dumps(
+            {
+                "namespace": namespace,
+                "pod": pod,
+                "deleted": False,
+                "reason": "no owner controller",
+            }
+        )
+    key = f"{namespace}/{pod}"
+    wait = cooldown_remaining(_LAST_RESTART.get(key), time.time(), _COOLDOWN)
+    if wait > 0:
+        return json.dumps(
+            {
+                "namespace": namespace,
+                "pod": pod,
+                "deleted": False,
+                "reason": "cooldown",
+                "retry_after_seconds": wait,
+            }
+        )
+    owner = owners[0].kind
     core.delete_namespaced_pod(pod, namespace)
+    _LAST_RESTART[key] = time.time()
+    logging.info("restart_pod namespace=%s pod=%s owner=%s", namespace, pod, owner)
     return json.dumps({"namespace": namespace, "pod": pod, "deleted": True, "owner": owner})
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8003"))
-    mcp.run(transport="sse", host="0.0.0.0", port=port)
+    mcp.run(transport="http", host="0.0.0.0", port=port, path="/mcp")

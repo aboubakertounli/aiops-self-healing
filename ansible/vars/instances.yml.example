@@ -1,0 +1,13 @@
+# Copy to instances.yml (gitignored if you add secrets later) and pass:
+#   ansible-playbook -e @vars/instances.yml instances.yml
+#
+# image and flavor must already exist in Glance and Nova.
+
+image: Ubuntu-24.04
+flavor: m1.medium
+agent_flavor: m1.small
+key_name: aiops
+public_key_file: "{{ lookup('env', 'HOME') }}/.ssh/id_rsa.pub"
+network: provider
+security_group: aiops-k8s
+east_west_cidr: 172.16.99.0/24

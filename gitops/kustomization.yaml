@@ -2,16 +2,5 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - namespace.yaml
-  - agent.yaml
-  - fluent-bit.yaml
   - monitoring.yaml
-images:
-  - name: mcp-metrics
-    newName: docker.io/aboubakertounli/mcp-metrics
-    newTag: dev
-  - name: mcp-infra
-    newName: docker.io/aboubakertounli/mcp-infra
-    newTag: dev
-  - name: aiops-agent
-    newName: docker.io/aboubakertounli/aiops-agent
-    newTag: dev
+  - alerts.yaml

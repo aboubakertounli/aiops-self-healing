@@ -1,70 +1,72 @@
 # AIOps self-healing platform
 
-Code for the OpenStack install, the Kubernetes bootstrap, the GitOps manifests, the three MCP servers, and the chat agent. OpenStack is installed with Kolla Ansible on two Ubuntu nodes. Kubernetes is a separate playbook, run after the three instances exist.
-
-The cluster is three Ubuntu VMs on the OpenStack compute host:
+OpenStack (Kolla Ansible), a three-node kubeadm cluster, Flux, Prometheus, and a Spring agent that can restart one application pod. The agent and the two MCP servers run on a fourth Nova VM, next to the cluster, not inside it.
 
 | VM | Role |
 |---|---|
 | `K8s-Master` | API server, scheduler, controller manager, etcd |
-| `K8s-Worker1` | kubelet, kube-proxy, application pods |
-| `K8s-Worker2` | kubelet, kube-proxy, application pods |
+| `K8s-Worker1` | Application pods |
+| `K8s-Worker2` | Application pods |
+| `AIOps-Agent` | docker compose: metrics MCP, infra MCP, Spring console |
 
-The master does not run the application. Pods run on the two workers.
+The only write the agent can make is `restart_pod`: delete one pod that has an owner controller. containerd starts the replacement. It does not edit manifests, scale nodes, or change OpenStack.
 
-Two namespaces hold what this repo deploys:
+Alertmanager calls `POST /api/alerts` when working-set memory is near the limit or `predict_linear` says it will be within an hour. The chat at `http://<agent-vm>:8080` is for questions you type.
 
-| Namespace | Contents |
-|---|---|
-| `aiops` | Metrics MCP server, infra MCP server, and the Spring agent. All three run on the control-plane node, separate from `kube-system`. |
-| `monitoring` | Prometheus and Grafana, from the `kube-prometheus-stack` chart |
-
-The workers run the application pods. The infra MCP server can delete one application pod. containerd starts the replacement. It does not create a node and it does not edit a manifest. Fluent Bit still runs on every node, including the workers, because that is how the logs are collected.
+A smaller GitLab repo, [AIOps kind lab](https://gitlab.com/aboubakertounli/aiops-kind-lab), is the laptop demo (kind + a stressable site). This repo is the CentOS lab.
 
 ## Folders
 
 | Folder | Role |
 |---|---|
-| `kolla/` | Kolla Ansible inventory and `globals.yml` for the controller and the compute node |
-| `ansible/` | SSH playbook that installs Kubernetes on the three VMs |
-| `gitops/` | Desired state Flux applies to the cluster |
-| `mcp-server-metrics/` | PromQL queries and a memory forecast |
-| `mcp-server-infra/` | Kubernetes and OpenStack reads, plus pod-log search |
-| `agent-backend/` | Spring Boot. `POST /api/chat` runs the model and the MCP tools |
-| `agent-frontend/index.html` | Same console the agent serves at `/`. Shows the model, the MCP servers, the reply, and each tool call |
-| `shared/` | `forecast.py`, the straight-line memory forecast used by the metrics server |
-| `tests/` | Checks that forecast: a steady climb reaches the limit, a flat line does not |
+| `kolla/` | Kolla Ansible inventory and `globals.yml` |
+| `ansible/` | `instances.yml` creates the four VMs; `site.yml` installs Kubernetes on the three K8s VMs |
+| `gitops/` | Flux: namespaces, RBAC, kube-prometheus-stack, our PrometheusRules |
+| `compose/` | Agent stack on `AIOps-Agent` |
+| `mcp-server-metrics/` | PromQL, including `predict_linear` |
+| `mcp-server-infra/` | Kubernetes and OpenStack reads, guarded `restart_pod` |
+| `agent-backend/` | Spring Boot. `POST /api/chat` and `POST /api/alerts` |
 
-`shared/` exists so the two servers do not each keep their own copy of the formula. `tests/` does not start a cluster. The GitLab job `test` runs it with `python -m unittest discover -s tests`.
+## Deploy from the CentOS server
 
-## Ansible
+The CentOS Stream 9 machine is the KVM hypervisor. Do not install kubeadm on it.
 
-Ansible connects to the three Ubuntu VMs over SSH and runs the same steps you would type, in order. Install it on the machine you run the command from (`sudo apt install ansible`), not inside the Kubernetes nodes. That machine needs an SSH key accepted by the `ubuntu` user on each VM.
+1. Install KVM. Create management `10.0.0.0/24` and provider `172.16.99.0/24`.
+2. Two Ubuntu 24.04 guests, two NICs each. Controller `10.0.0.11`, compute `10.0.0.31`. Leave the provider NIC without an IP. Enable nested virtualization on the compute guest.
+3. Install OpenStack with Kolla (section below). Horizon and Keystone listen on VIP `10.0.0.10`. That VIP is on the management network; the laptop and the provider-LAN VMs cannot reach it until a later network change.
+4. Create the four VMs:
 
-Copy `ansible/inventory/hosts.yml.example` to `ansible/inventory/hosts.yml` and replace the three addresses with the ones Horizon shows. The inventory is the list of machines. `master` and `workers` are groups. `site.yml` is the playbook: which group runs which tasks.
+   ```bash
+   cd ansible
+   ansible-galaxy collection install -r requirements.yml
+   # export OS_* toward the Kolla VIP
+   cp vars/instances.yml.example vars/instances.yml
+   ansible-playbook -e @vars/instances.yml instances.yml
+   ```
 
-`site.yml` has three plays:
+   Horizon is the fallback. Tag metadata `k8s_role=master`, `workers`, or `agent`.
+5. Copy `ansible/inventory/hosts.yml.example` to `hosts.yml` and run `ansible-playbook -i inventory/hosts.yml site.yml`. That playbook never touches the agent VM.
+6. Bootstrap Flux against this GitLab repo:
 
-1. On the master, roles `common` and `kubernetes_master`. `common` turns off swap, loads `overlay` and `br_netfilter`, installs containerd, kubeadm, kubelet, and kubectl. containerd is the runtime kubeadm uses. `kubernetes_master` runs `kubeadm init` and saves the join command.
-2. On the master, role `kubernetes_network` installs Flannel. Pods need that network before the workers are useful.
-3. On the workers, `common` again, then `kubernetes_worker`, which runs the join command from the master.
+   ```bash
+   flux bootstrap gitlab \
+     --hostname=gitlab.com \
+     --owner=aboubakertounli \
+     --repository=aiops-self-healing-agent \
+     --branch=main \
+     --path=gitops \
+     --personal \
+     --token-auth
+   ```
 
-A role is a directory under `ansible/roles/<name>/tasks/main.yml`. `become: true` runs the tasks with sudo.
+7. Replace `AGENT_VM_IP` in `gitops/monitoring.yaml` with the address Nova gave `AIOps-Agent`. Copy a kubeconfig for ServiceAccount `mcp-infra` onto that VM (`secret/mcp-infra-token` in namespace `aiops`). Set `PROMETHEUS_URL=http://<worker>:30090` in `compose/.env`.
+8. On `AIOps-Agent`, build or pull the three images and run `docker compose -f compose/docker-compose.yml up -d`. Open `http://<agent-vm>:8080`.
 
-```bash
-cd ansible
-ansible-playbook -i inventory/hosts.yml site.yml
-```
-
-Done when `kubectl get nodes` on the master shows three nodes `Ready`. `inventory/openstack.yml` is the other inventory: the OpenStack plugin discovers the VMs from Nova instead of a static file. Set `OS_AUTH_URL` to the Kolla VIP (`http://10.0.0.10:5000/v3` unless you changed it), plus `OS_USERNAME`, `OS_PASSWORD`, and `OS_PROJECT_NAME`. Tag the master instance with metadata `k8s_role=master` and the two workers with `k8s_role=workers`, so the group names match `site.yml`.
+Grafana: `http://<any-node>:30000` (user `admin`, password `admin`). Prometheus: `http://<any-node>:30090`.
 
 ## Kolla
 
-`kolla/` installs OpenStack. It does not create the Kubernetes instances and it does not run `site.yml`.
-
-Two Ubuntu 24.04 nodes, each with two NICs. The management NIC keeps its address (`10.0.0.11` on the controller, `10.0.0.31` on the compute). The provider NIC has no address. Kolla attaches that second NIC to `br-ex`. The names in `kolla/globals.yml` (`eth0`, `eth1`) have to be replaced with the names from `ip a` if they differ. `kolla_internal_vip_address` is a free address on `10.0.0.0/24`. Horizon and Keystone listen on that VIP, not on `10.0.0.11`.
-
-From the machine that can SSH to both nodes as `ubuntu`:
+Two Ubuntu 24.04 nodes, each with two NICs. The management NIC keeps its address. The provider NIC has no address; Kolla attaches it to `br-ex`. Kolla 2025.1 uses Open vSwitch, not OVN. `kolla_internal_vip_address` is still required even with a single controller.
 
 ```bash
 python3 -m venv .venv
@@ -81,103 +83,34 @@ kolla-ansible post-deploy -i kolla/inventory/multinode
 PROVIDER_GATEWAY=172.16.99.1 bash kolla/init-provider-network.sh
 ```
 
-`kolla-genpwd` writes `/etc/kolla/passwords.yml`. That file stays on the operator machine. Then open Horizon at `http://10.0.0.10` and launch the three Ubuntu instances on the `provider` network. Set `PROVIDER_GATEWAY` to the router that already exists on `172.16.99.0/24`.
+`kolla-genpwd` writes `/etc/kolla/passwords.yml`. That file stays off git.
+
+Kolla Prometheus exporters (node, libvirt, openstack-exporter) are a later change. They are not Fluent Bit. Fluent Bit is not in this repo: the agent reads live pod logs through the Kubernetes API.
+
+## Ansible
+
+`instances.yml` uses `openstack.cloud` modules: keypair, security group, four servers. `site.yml` installs containerd, kubeadm 1.32, Flannel (`10.244.0.0/16`).
+
+`inventory/openstack.yml` is the dynamic inventory (`plugin: openstack.cloud.openstack`). `expand_hostvars` is off because it queries Cinder, which this Kolla cloud does not install. Groups match metadata `k8s_role`.
 
 ## GitOps
 
-`gitops/` is the desired state of the cluster. Flux watches this directory on `main` and creates, updates, or deletes objects until the cluster matches the files. Editing a live pod with `kubectl` and not committing the file means Flux will put the old spec back.
+Flux applies `gitops/`. The cluster holds collectors and RBAC only:
 
-`kustomization.yaml` is the index of that directory. It names the YAML files to include:
+- `namespace.yaml` — `aiops`, `monitoring`, ServiceAccount `mcp-infra`, a token Secret, ClusterRole that can get/list pods and delete pods
+- `monitoring.yaml` — kube-prometheus-stack, NodePorts 30090 / 30000, Alertmanager webhook
+- `alerts.yaml` — `MemoryBreachSoon` (`predict_linear` of `container_memory_working_set_bytes`) and `MemoryNearLimit`
 
-- `namespace.yaml` creates `aiops` and `monitoring`, plus read access for the infra MCP server
-- `agent.yaml` is the metrics server, the infra server, and the Spring agent, scheduled on the control-plane node
-- `fluent-bit.yaml` tails container logs on every node
-- `monitoring.yaml` is the Prometheus and Grafana chart
+The agent Deployments are not here. They run in `compose/`.
 
-The Deployments use short image names (`mcp-metrics`, `aiops-agent`). The `images:` block in `kustomization.yaml` rewrites them to `docker.io/aboubakertounli/<name>:dev` before anything is applied. Change `newTag` when you push a new image.
+## Agent VM
 
-Grafana is not a separate manifest. `monitoring.yaml` is a Flux HelmRelease for `kube-prometheus-stack`. That chart installs Prometheus and Grafana into `monitoring`. The password in the file is `admin`. After Flux has applied it, the service name is `kube-prometheus-stack-grafana`.
+`compose/docker-compose.yml` starts the two MCP servers (Streamable HTTP at `/mcp`) and the Spring app (Spring AI 1.1). `restart_pod` refuses `kube-system`, pods with no owner, namespaces outside `RESTART_NAMESPACES` when that list is set, and a second delete of the same pod during `RESTART_COOLDOWN_SECONDS` (default 300). Each accepted delete writes one log line.
+
+Ollama on the CentOS GPU: set `OPENAI_BASE_URL=http://<centos>:11434`, `OPENAI_API_KEY=ollama`, and a tool-capable model such as `qwen2.5:7b`.
 
 ## What is not in this repo
 
-Train Ticket is not here. It is the separate project [FudanSELab/train-ticket](https://github.com/FudanSELab/train-ticket). This repo also has no DevSecOps pipeline for it: no SonarQube, Maven build of those services, OWASP check, or Trivy scan of those images.
+Train Ticket is later. The kind/laptop demo is the other GitLab project. There is no Loki and no Fluent Bit. OpenStack host metrics from Kolla exporters come later.
 
-`.gitlab-ci.yml` only does two things for this platform: run `tests/`, then build and push the three MCP images and the agent image. It does not deploy Train Ticket and it does not update `gitops/`.
-
-## Deploy from the CentOS server
-
-The CentOS Stream 9 machine is the hypervisor. Kolla 2025.1 installs OpenStack on Ubuntu 24.04 guests, and the Kubernetes playbook also targets Ubuntu. Do not install kubeadm on the CentOS host.
-
-1. On CentOS, install KVM and allow the compute guest to run VMs: `dnf install -y qemu-kvm libvirt virt-install`, then `systemctl enable --now libvirtd`.
-2. Create the two networks. Management is `10.0.0.0/24`. The provider bridge is attached to the physical NIC and uses `172.16.99.0/24`.
-3. Create two Ubuntu 24.04 guests, each with one NIC on each network. Controller `10.0.0.11`. Compute `10.0.0.31`. Leave the provider NIC without an address. Enable nested virtualization on the compute guest.
-4. From a machine that can SSH to both guests, run the Kolla commands in the section above. Edit `eth0` and `eth1` in `kolla/globals.yml` first if `ip a` shows other names.
-5. Open Horizon at `http://10.0.0.10`. Launch `K8s-Master`, `K8s-Worker1`, and `K8s-Worker2` from an Ubuntu 24.04 image on the `provider` network. Tag them `k8s_role=master` or `k8s_role=workers`.
-6. Copy `ansible/inventory/hosts.yml.example` to `hosts.yml`, set the three addresses, and run `ansible-playbook -i inventory/hosts.yml site.yml`.
-7. Build and push the three images listed below, bootstrap Flux, then open the console. For OpenAI, create the `llm` secret. For Ollama on the CentOS GPU, set `OPENAI_BASE_URL` and `OPENAI_MODEL` in `gitops/agent.yaml`.
-
-Workers receive Train Ticket only. The agent, the metrics server, and the infra server stay in the namespace `aiops` on `K8s-Master`.
-
-## Execution order
-
-Each step needs the one before it.
-
-1. **OpenStack.** Kolla on the two Ubuntu nodes, then the provider network. Horizon at `http://10.0.0.10`.
-2. **Instances.** From Horizon, launch `K8s-Master`, `K8s-Worker1`, and `K8s-Worker2` on the `provider` network from an Ubuntu 24.04 image.
-3. **Ansible.** Fill `hosts.yml` and run the playbook above.
-4. **Images.** From the repo root, build and push:
-
-   ```bash
-   docker build -f mcp-server-metrics/Dockerfile -t docker.io/aboubakertounli/mcp-metrics:dev .
-   docker build -f mcp-server-infra/Dockerfile -t docker.io/aboubakertounli/mcp-infra:dev .
-   docker build -f agent-backend/Dockerfile -t docker.io/aboubakertounli/aiops-agent:dev .
-   docker push docker.io/aboubakertounli/mcp-metrics:dev
-   docker push docker.io/aboubakertounli/mcp-infra:dev
-   docker push docker.io/aboubakertounli/aiops-agent:dev
-   ```
-
-5. **Flux.** On the master, after `kubectl` works:
-
-   ```bash
-   curl -s https://fluxcd.io/install.sh | sudo bash
-   flux bootstrap github \
-     --owner=aboubakertounli \
-     --repository=aiops-self-healing \
-     --branch=main \
-     --path=gitops \
-     --personal
-   ```
-
-6. **Secret and model.** For OpenAI, create the key the pod reads:
-
-   ```bash
-   kubectl -n aiops create secret generic llm --from-literal=OPENAI_API_KEY=sk-...
-   ```
-
-   For a model on your own GPU, install Ollama on the CentOS host (the machine that has the GPU) and change `OPENAI_BASE_URL` and `OPENAI_MODEL` in `gitops/agent.yaml`. Example: base URL `http://<centos-host>:11434` and model `qwen2.5:7b`. The model has to support tool calls. The secret can stay absent: the key defaults to `ollama`.
-
-7. **Console.** Port-forward the agent and open the page it serves:
-
-   ```bash
-   kubectl -n aiops port-forward svc/aiops-agent 8080:8080
-   ```
-
-   Open `http://localhost:8080`. The page shows the model, the two MCP servers, the reply, and each tool call. `AGENT_WATCH_SECONDS` stays `0`, so the model runs when you send a message. Set it to `300` when you want the same inspection to repeat every five minutes.
-
-## Checks
-
-| After | You should see |
-|---|---|
-| Horizon | Three running instances |
-| Ansible | `kubectl get nodes` shows 3 Ready |
-| Flux | Pods in `monitoring` and `aiops` |
-| Secret or Ollama URL | `aiops-agent` pod Running |
-| Console | `http://localhost:8080` shows the model and a reply that names a real pod |
-
-Grafana, once the chart is installed:
-
-```bash
-kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3000:80
-```
-
-Open `http://localhost:3000`. User `admin`, password `admin`.
+`.gitlab-ci.yml` runs `tests/` then builds and pushes the three images to the GitLab registry.

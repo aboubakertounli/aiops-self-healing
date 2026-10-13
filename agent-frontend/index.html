@@ -126,7 +126,7 @@
     <aside>
       <div>
         <div class="mark">AI<span>Ops</span></div>
-        <p class="quiet">Control-plane agent in namespace aiops. Workers stay free for the application.</p>
+        <p class="quiet">The agent and the two MCP servers run on a VM next to the cluster. Workers stay free for the application.</p>
       </div>
       <div class="block">
         <h2>Model</h2>
@@ -143,8 +143,8 @@
         <button class="clear" type="button" id="clear">Clear this conversation</button>
       </div>
       <div class="block">
-        <h2>Unattended watch</h2>
-        <div class="watch"><strong id="watch-state">Off</strong><p id="watch-body">The model runs when you send a message. Set AGENT_WATCH_SECONDS to run this same inspection on a timer.</p></div>
+        <h2>Last alert</h2>
+        <div class="watch"><strong id="watch-state">None yet</strong><p id="watch-body">Alertmanager calls POST /api/alerts. The chat is for questions you type.</p></div>
       </div>
     </aside>
     <main>
@@ -153,7 +153,7 @@
         <div id="status">Connecting</div>
       </header>
       <div id="log">
-        <p class="empty">Ask about the cluster. Each tool the model calls shows up under the reply: metrics from Prometheus, diagnostics and pod deletion from the infra server.</p>
+        <p class="empty">Ask about the cluster, or wait for Alertmanager. Each tool the model calls shows up under the reply.</p>
       </div>
       <form id="chat">
         <input id="message" placeholder="Which pods are close to their memory limit?" autocomplete="off">
@@ -220,12 +220,10 @@
 
     async function loadWatch() {
       try {
-        const watch = await (await fetch(api + "/api/watch")).json();
-        document.querySelector("#watch-state").textContent = watch.enabled
-          ? "Every " + watch.intervalSeconds + "s"
-          : "Off";
-        if (watch.reply) {
-          document.querySelector("#watch-body").textContent = (watch.at || "") + "\n" + watch.reply;
+        const alert = await (await fetch(api + "/api/alerts")).json();
+        document.querySelector("#watch-state").textContent = alert.received ? "Investigated" : "None yet";
+        if (alert.reply) {
+          document.querySelector("#watch-body").textContent = (alert.at || "") + "\n" + alert.reply;
         }
       } catch (error) {
         /* info already reports the outage */

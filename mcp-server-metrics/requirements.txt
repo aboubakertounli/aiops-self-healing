@@ -1,2 +1,2 @@
-fastmcp
-requests
+fastmcp>=2.3.0,<3
+requests>=2.32.0,<3

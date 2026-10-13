@@ -1,4 +1,4 @@
-"""MCP server 2: Prometheus history, forecasts, and anomaly checks."""
+"""MCP server: Prometheus reads and PromQL forecasts."""
 
 import json
 import os
@@ -7,10 +7,10 @@ import time
 import requests
 from fastmcp import FastMCP
 
-from shared.forecast import linear_forecast, minutes_to_limit
+from queries import cpu_query, limit_query, memory_query, predict_query
 
 mcp = FastMCP("metrics")
-PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://kube-prometheus-stack-prometheus.monitoring.svc:9090")
+PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://127.0.0.1:30090")
 
 
 def _query(promql: str) -> list:
@@ -42,10 +42,10 @@ def _range_seconds(range_expr: str) -> int:
 
 @mcp.tool()
 def get_realtime_metrics(pod: str) -> str:
-    """Current CPU rate, memory usage, limit, and percent for one pod, from Prometheus."""
-    cpu = _query(f'sum(rate(container_cpu_usage_seconds_total{{pod="{pod}"}}[5m]))')
-    memory = _query(f'sum(container_memory_usage_bytes{{pod="{pod}",container!="",container!="POD"}})')
-    limit = _query(f'max(container_spec_memory_limit_bytes{{pod="{pod}",container!="",container!="POD"}})')
+    """Current CPU rate, working-set memory, limit, and percent for one pod, from Prometheus."""
+    cpu = _query(cpu_query(pod))
+    memory = _query(memory_query(pod))
+    limit = _query(limit_query(pod))
     used = _as_float(_first_value(memory))
     limit_bytes = _as_float(_first_value(limit))
     percent = round(100 * used / limit_bytes, 1) if used is not None and limit_bytes else None
@@ -62,12 +62,8 @@ def get_realtime_metrics(pod: str) -> str:
 
 @mcp.tool()
 def get_historical_metrics(pod: str, range_expr: str = "1h", step: str = "1m") -> str:
-    """Memory samples for a pod over a Prometheus range such as 1h."""
-    series = _query_range(
-        f'sum(container_memory_usage_bytes{{pod="{pod}"}})',
-        _range_seconds(range_expr),
-        step,
-    )
+    """Working-set memory samples for a pod over a Prometheus range such as 1h."""
+    series = _query_range(memory_query(pod), _range_seconds(range_expr), step)
     values = []
     if series:
         values = [float(point[1]) for point in series[0].get("values", [])]
@@ -75,39 +71,34 @@ def get_historical_metrics(pod: str, range_expr: str = "1h", step: str = "1m") -
 
 
 @mcp.tool()
-def predict_container_state(pod: str, steps_ahead: int = 30) -> str:
-    """Forecast memory one sample at a time. steps_ahead uses the 1m history."""
-    history = json.loads(get_historical_metrics(pod, "1h", "1m"))
-    samples = history["memory_bytes"]
-    projected = linear_forecast(samples, steps_ahead)
+def predict_container_state(pod: str, seconds_ahead: int = 1800) -> str:
+    """Prometheus predict_linear of working-set memory, seconds_ahead from now."""
+    projected = _as_float(_first_value(_query(predict_query(pod, seconds_ahead))))
     return json.dumps(
         {
             "pod": pod,
-            "samples": len(samples),
-            "steps_ahead": steps_ahead,
+            "seconds_ahead": seconds_ahead,
             "projected_memory_bytes": projected,
+            "promql": predict_query(pod, seconds_ahead),
         }
     )
 
 
 @mcp.tool()
 def predict_memory_breach(pod: str) -> str:
-    """Minutes until this pod's memory trend reaches its limit. None when the line is flat or falling."""
-    history = json.loads(get_historical_metrics(pod, "1h", "1m"))
-    samples = history["memory_bytes"]
-    limit = _as_float(
-        _first_value(
-            _query(f'max(container_spec_memory_limit_bytes{{pod="{pod}",container!="",container!="POD"}})')
-        )
+    """Whether predict_linear of working-set memory crosses the limit within one hour."""
+    limit = _as_float(_first_value(_query(limit_query(pod))))
+    projected = _as_float(_first_value(_query(predict_query(pod, 3600))))
+    will_breach = (
+        projected is not None and limit is not None and projected >= limit
     )
-    minutes = minutes_to_limit(samples, limit or 0, 60)
     return json.dumps(
         {
             "pod": pod,
-            "samples": len(samples),
             "memory_limit_bytes": limit,
-            "minutes_to_limit": minutes,
-            "will_breach": minutes is not None,
+            "projected_memory_bytes_1h": projected,
+            "will_breach": will_breach,
+            "promql": predict_query(pod, 3600),
         }
     )
 
@@ -155,4 +146,4 @@ def _as_float(value):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8002"))
-    mcp.run(transport="sse", host="0.0.0.0", port=port)
+    mcp.run(transport="http", host="0.0.0.0", port=port, path="/mcp")

@@ -1,0 +1,96 @@
+---
+# Creates the four provider-network VMs. Run this after Kolla and
+# kolla/init-provider-network.sh, from a host that can reach Keystone.
+# Horizon remains a fallback if you prefer to click the instances.
+#
+#   ansible-galaxy collection install -r requirements.yml
+#   export OS_AUTH_URL OS_USERNAME OS_PASSWORD OS_PROJECT_NAME \
+#          OS_USER_DOMAIN_NAME OS_PROJECT_DOMAIN_NAME
+#   ansible-playbook -e @vars/instances.yml instances.yml
+#
+# site.yml never touches the agent VM: inventory groups only match
+# k8s_role=master|worker|workers.
+
+- name: Create the Kubernetes and agent instances
+  hosts: localhost
+  gather_facts: false
+  vars:
+    image: Ubuntu-24.04
+    flavor: m1.medium
+    agent_flavor: m1.small
+    key_name: aiops
+    public_key_file: "{{ lookup('env', 'HOME') }}/.ssh/id_rsa.pub"
+    network: provider
+    security_group: aiops-k8s
+    east_west_cidr: 172.16.99.0/24
+    instances:
+      - name: K8s-Master
+        role: master
+      - name: K8s-Worker1
+        role: workers
+      - name: K8s-Worker2
+        role: workers
+      - name: AIOps-Agent
+        role: agent
+        flavor: "{{ agent_flavor }}"
+
+  tasks:
+    - name: Upload the SSH public key
+      openstack.cloud.keypair:
+        name: "{{ key_name }}"
+        public_key_file: "{{ public_key_file }}"
+
+    - name: Create the lab security group
+      openstack.cloud.security_group:
+        name: "{{ security_group }}"
+        description: SSH plus east-west traffic for the K8s and agent VMs
+
+    - name: Allow ICMP
+      openstack.cloud.security_group_rule:
+        security_group: "{{ security_group }}"
+        protocol: icmp
+        remote_ip_prefix: 0.0.0.0/0
+
+    - name: Allow SSH
+      openstack.cloud.security_group_rule:
+        security_group: "{{ security_group }}"
+        protocol: tcp
+        port_range_min: 22
+        port_range_max: 22
+        remote_ip_prefix: 0.0.0.0/0
+
+    - name: Allow all TCP inside the provider network
+      openstack.cloud.security_group_rule:
+        security_group: "{{ security_group }}"
+        protocol: tcp
+        remote_ip_prefix: "{{ east_west_cidr }}"
+
+    - name: Allow all UDP inside the provider network
+      openstack.cloud.security_group_rule:
+        security_group: "{{ security_group }}"
+        protocol: udp
+        remote_ip_prefix: "{{ east_west_cidr }}"
+
+    - name: Launch the instances
+      openstack.cloud.server:
+        name: "{{ item.name }}"
+        image: "{{ image }}"
+        flavor: "{{ item.flavor | default(flavor) }}"
+        key_name: "{{ key_name }}"
+        network: "{{ network }}"
+        security_groups:
+          - "{{ security_group }}"
+        metadata:
+          k8s_role: "{{ item.role }}"
+        auto_ip: false
+        timeout: 300
+        wait: true
+      loop: "{{ instances }}"
+      register: created
+
+    - name: Show the addresses Nova assigned
+      ansible.builtin.debug:
+        msg: "{{ item.server.name }} {{ item.server.access_ipv4 | default(item.server.private_v4, true) | default('see Horizon') }} role={{ item.item.role }}"
+      loop: "{{ created.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"

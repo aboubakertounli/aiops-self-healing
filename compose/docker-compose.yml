@@ -1,0 +1,51 @@
+# Run on the AIOps-Agent VM, not inside the cluster.
+# Copy a kubeconfig that uses the mcp-infra ServiceAccount to ./kubeconfig
+# and point PROMETHEUS_URL at a worker NodePort (30090).
+
+services:
+  mcp-metrics:
+    image: ${MCP_METRICS_IMAGE:-registry.gitlab.com/aboubakertounli/aiops-self-healing-agent/mcp-metrics:latest}
+    build:
+      context: ..
+      dockerfile: mcp-server-metrics/Dockerfile
+    environment:
+      PORT: "8002"
+      PROMETHEUS_URL: ${PROMETHEUS_URL:-http://127.0.0.1:30090}
+    ports:
+      - "8002:8002"
+    restart: unless-stopped
+
+  mcp-infra:
+    image: ${MCP_INFRA_IMAGE:-registry.gitlab.com/aboubakertounli/aiops-self-healing-agent/mcp-infra:latest}
+    build:
+      context: ..
+      dockerfile: mcp-server-infra/Dockerfile
+    environment:
+      PORT: "8003"
+      KUBECONFIG: /root/.kube/config
+      RESTART_NAMESPACES: ${RESTART_NAMESPACES:-}
+      RESTART_COOLDOWN_SECONDS: ${RESTART_COOLDOWN_SECONDS:-300}
+      OS_CLOUD: ${OS_CLOUD:-}
+    volumes:
+      - ${KUBECONFIG_FILE:-./kubeconfig}:/root/.kube/config:ro
+    ports:
+      - "8003:8003"
+    restart: unless-stopped
+
+  aiops-agent:
+    image: ${AGENT_IMAGE:-registry.gitlab.com/aboubakertounli/aiops-self-healing-agent/aiops-agent:latest}
+    build:
+      context: ..
+      dockerfile: agent-backend/Dockerfile
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-ollama}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+      MCP_METRICS_URL: http://mcp-metrics:8002
+      MCP_INFRA_URL: http://mcp-infra:8003
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mcp-metrics
+      - mcp-infra
+    restart: unless-stopped

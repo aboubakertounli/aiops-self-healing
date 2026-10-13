@@ -11,17 +11,14 @@ spring:
     mcp:
       client:
         type: SYNC
-        sse:
+        streamable-http:
           connections:
             metrics:
               url: ${MCP_METRICS_URL:http://localhost:8002}
-              sse-endpoint: /sse
+              endpoint: /mcp
             infra:
               url: ${MCP_INFRA_URL:http://localhost:8003}
-              sse-endpoint: /sse
-
-agent:
-  watch-seconds: ${AGENT_WATCH_SECONDS:0}
+              endpoint: /mcp
 
 server:
   port: 8080

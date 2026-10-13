@@ -14,18 +14,18 @@ import java.util.Map;
 @RestController
 public class ChatController {
     private final AgentService agentService;
-    private final ClusterWatch clusterWatch;
+    private final AlertInbox alertInbox;
     private final String baseUrl;
     private final String metricsUrl;
     private final String infraUrl;
 
     public ChatController(AgentService agentService,
-                          ClusterWatch clusterWatch,
+                          AlertInbox alertInbox,
                           @Value("${spring.ai.openai.base-url:https://api.openai.com}") String baseUrl,
-                          @Value("${spring.ai.mcp.client.sse.connections.metrics.url}") String metricsUrl,
-                          @Value("${spring.ai.mcp.client.sse.connections.infra.url}") String infraUrl) {
+                          @Value("${spring.ai.mcp.client.streamable-http.connections.metrics.url}") String metricsUrl,
+                          @Value("${spring.ai.mcp.client.streamable-http.connections.infra.url}") String infraUrl) {
         this.agentService = agentService;
-        this.clusterWatch = clusterWatch;
+        this.alertInbox = alertInbox;
         this.baseUrl = baseUrl;
         this.metricsUrl = metricsUrl;
         this.infraUrl = infraUrl;
@@ -45,9 +45,19 @@ public class ChatController {
         );
     }
 
-    @GetMapping("/api/watch")
-    public WatchReport watch() {
-        return clusterWatch.status();
+    @GetMapping("/api/alerts")
+    public AlertReport lastAlert() {
+        return alertInbox.last();
+    }
+
+    @PostMapping("/api/alerts")
+    public ChatResponse alerts(@RequestBody AlertmanagerWebhook webhook) {
+        if (webhook == null || webhook.firing().isEmpty()) {
+            return new ChatResponse("No firing alerts.", agentService.model(), List.of());
+        }
+        ChatResponse response = agentService.chat(new ChatRequest("alerts", webhook.toPrompt()));
+        alertInbox.remember(response);
+        return response;
     }
 
     @PostMapping("/api/chat")

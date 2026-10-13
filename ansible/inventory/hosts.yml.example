@@ -1,4 +1,5 @@
-# Copy to hosts.yml and set the addresses Horizon gave the three instances.
+# Copy to hosts.yml and set the addresses Nova (or Horizon) gave the VMs.
+# site.yml uses only master and workers. The agent VM is not a Kubernetes node.
 all:
   vars:
     ansible_user: ubuntu
@@ -16,3 +17,7 @@ all:
           ansible_host: 172.16.99.51
         k8s-worker2:
           ansible_host: 172.16.99.52
+    agent:
+      hosts:
+        aiops-agent:
+          ansible_host: 172.16.99.60

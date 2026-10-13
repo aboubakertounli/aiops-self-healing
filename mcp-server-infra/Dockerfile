@@ -4,6 +4,7 @@ WORKDIR /app
 COPY mcp-server-infra/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY mcp-server-infra/server.py /app/server.py
+COPY mcp-server-infra/policy.py /app/policy.py
 
 ENV PORT=8003
 EXPOSE 8003

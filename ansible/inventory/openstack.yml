@@ -3,21 +3,24 @@
 #   ansible-galaxy collection install -r requirements.yml
 #
 # Export OS_AUTH_URL, OS_USERNAME, OS_PASSWORD, OS_PROJECT_NAME,
-# OS_USER_DOMAIN_NAME and OS_PROJECT_DOMAIN_NAME.
-# OS_AUTH_URL is the Keystone URL. With Kolla that is the internal VIP,
+# OS_USER_DOMAIN_NAME and OS_PROJECT_DOMAIN_NAME, or use a clouds.yaml.
+# OS_AUTH_URL is the Keystone URL. With Kolla that is the VIP,
 # not a fixed address chosen on the controller.
 #
 # When launching each instance, set the metadata key k8s_role:
 #   master   -> group master
 #   worker   -> group workers
 #   workers  -> group workers
-plugin: openstack.cloud.inventory
-expand_hostvars: true
+#
+# The plugin sets ansible_host itself: the floating IP when there is one,
+# otherwise the first fixed IP, which is the provider address here.
+# expand_hostvars stays off because it queries Cinder, which Kolla does not install.
+plugin: openstack.cloud.openstack
+expand_hostvars: false
 fail_on_errors: true
 groups:
   master: openstack.metadata.k8s_role | default('') == 'master'
   workers: openstack.metadata.k8s_role | default('') in ['worker', 'workers']
 compose:
-  ansible_host: openstack.access_ipv4 | default(openstack.private_v4, true) | default(openstack.public_v4, true)
   ansible_user: "'ubuntu'"
   ansible_python_interpreter: "'/usr/bin/python3'"

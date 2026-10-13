@@ -1,0 +1,62 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: aiops-memory
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: aiops.memory
+      rules:
+        - alert: MemoryBreachSoon
+          expr: |
+            (
+              predict_linear(
+                sum by (namespace, pod) (
+                  container_memory_working_set_bytes{container!="",container!="POD"}
+                )[30m:1m],
+                3600
+              )
+              /
+              clamp_min(
+                sum by (namespace, pod) (
+                  container_spec_memory_limit_bytes{container!="",container!="POD"}
+                ),
+                1
+              )
+            ) > 0.95
+            and
+            sum by (namespace, pod) (
+              container_spec_memory_limit_bytes{container!="",container!="POD"}
+            ) > 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.pod }} in {{ $labels.namespace }} is trending toward its memory limit"
+            description: "predict_linear of working-set memory over 30m exceeds 95% of the limit within one hour."
+        - alert: MemoryNearLimit
+          expr: |
+            (
+              sum by (namespace, pod) (
+                container_memory_working_set_bytes{container!="",container!="POD"}
+              )
+              /
+              clamp_min(
+                sum by (namespace, pod) (
+                  container_spec_memory_limit_bytes{container!="",container!="POD"}
+                ),
+                1
+              )
+            ) > 0.9
+            and
+            sum by (namespace, pod) (
+              container_spec_memory_limit_bytes{container!="",container!="POD"}
+            ) > 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.pod }} in {{ $labels.namespace }} is above 90% of its memory limit"
+            description: "Working-set memory is above 90% of container_spec_memory_limit_bytes."

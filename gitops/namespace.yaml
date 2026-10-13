@@ -14,6 +14,17 @@ metadata:
   name: mcp-infra
   namespace: aiops
 ---
+# Long-lived token copied onto the agent VM as a kubeconfig.
+#   kubectl -n aiops get secret mcp-infra-token -o jsonpath='{.data.token}' | base64 -d
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mcp-infra-token
+  namespace: aiops
+  annotations:
+    kubernetes.io/service-account.name: mcp-infra
+type: kubernetes.io/service-account-token
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
