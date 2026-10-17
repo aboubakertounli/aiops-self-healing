@@ -1,0 +1,56 @@
+:root {
+  --night: #12100e;
+  --walnut: #2a211b;
+  --panel: #1b1613;
+  --brass: #e09a55;
+  --brass-deep: #a86832;
+  --paper: #f3eadc;
+  --paper-2: #e7dccb;
+  --ink: #1c1612;
+  --moss: #b7d3be;
+  --danger: #f0b2a8;
+  --muted: #b3a394;
+  --line: rgba(243, 234, 220, 0.12);
+  --serif: "Fraunces", "Iowan Old Style", Palatino, Georgia, serif;
+  --sans: "Outfit", "Avenir Next", "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", "Cascadia Mono", ui-monospace, monospace;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 500px at 10% -10%, rgba(224, 154, 85, 0.16), transparent 55%),
+    linear-gradient(180deg, #1a1512 0%, var(--night) 28%);
+  color: var(--paper);
+  font-family: var(--sans);
+  font-weight: 380;
+}
+
+button, textarea { font: inherit; color: inherit; }
+
+button { cursor: pointer; }
+
+button:disabled { cursor: progress; opacity: 0.55; }
+
+:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 3px;
+}
+
+::selection { background: #e09a55; color: #1c1612; }
+
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}

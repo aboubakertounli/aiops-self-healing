@@ -7,11 +7,11 @@ OpenStack (Kolla Ansible), a three-node kubeadm cluster, Flux, Prometheus, and a
 | `K8s-Master` | API server, scheduler, controller manager, etcd |
 | `K8s-Worker1` | Application pods |
 | `K8s-Worker2` | Application pods |
-| `AIOps-Agent` | docker compose: metrics MCP, infra MCP, Spring console |
+| `AIOps-Agent` | docker compose: k8s-container-metrics, k8s-cluster-openstack, Angular console |
 
 The only write the agent can make is `restart_pod`: delete one pod that has an owner controller. containerd starts the replacement. It does not edit manifests, scale nodes, or change OpenStack.
 
-Alertmanager calls `POST /api/alerts` when working-set memory is near the limit or `predict_linear` says it will be within an hour. The chat at `http://<agent-vm>:8080` is for questions you type.
+Alertmanager calls `POST /api/alerts` when working-set memory is near the limit or `predict_linear` says it will be within an hour. The Angular signal desk at `http://<agent-vm>:8080` is for questions you type.
 
 A smaller GitLab repo, [AIOps kind lab](https://gitlab.com/aboubakertounli/aiops-kind-lab), is the laptop demo (kind + a stressable site). This repo is the CentOS lab.
 
@@ -23,9 +23,10 @@ A smaller GitLab repo, [AIOps kind lab](https://gitlab.com/aboubakertounli/aiops
 | `ansible/` | `instances.yml` creates the four VMs; `site.yml` installs Kubernetes on the three K8s VMs |
 | `gitops/` | Flux: namespaces, RBAC, kube-prometheus-stack, our PrometheusRules |
 | `compose/` | Agent stack on `AIOps-Agent` |
-| `mcp-server-metrics/` | PromQL, including `predict_linear` |
-| `mcp-server-infra/` | Kubernetes and OpenStack reads, guarded `restart_pod` |
-| `agent-backend/` | Spring Boot. `POST /api/chat` and `POST /api/alerts` |
+| `mcp-server-metrics/` | MCP server `k8s-container-metrics`: PromQL for container CPU and memory, including `predict_linear` |
+| `mcp-server-infra/` | MCP server `k8s-cluster-openstack`: Kubernetes cluster, pod logs, OpenStack compute, guarded `restart_pod` |
+| `agent-backend/` | Spring Boot. `POST /api/chat` and `POST /api/alerts`. The image build copies the Angular app into it |
+| `agent-frontend/` | Angular signal desk. `npm start` proxies `/api` to port 8080 |
 
 ## Deploy from the CentOS server
 
@@ -59,7 +60,7 @@ The CentOS Stream 9 machine is the KVM hypervisor. Do not install kubeadm on it.
      --token-auth
    ```
 
-7. Replace `AGENT_VM_IP` in `gitops/monitoring.yaml` with the address Nova gave `AIOps-Agent`. Copy a kubeconfig for ServiceAccount `mcp-infra` onto that VM (`secret/mcp-infra-token` in namespace `aiops`). Set `PROMETHEUS_URL=http://<worker>:30090` in `compose/.env`.
+7. Replace `AGENT_VM_IP` in `gitops/monitoring.yaml` with the address Nova gave `AIOps-Agent`. Copy a kubeconfig for ServiceAccount `k8s-cluster-openstack` onto that VM (`secret/k8s-cluster-openstack-token` in namespace `token-for-agent`). Set `PROMETHEUS_URL=http://<worker>:30090` in `compose/.env`.
 8. On `AIOps-Agent`, build or pull the three images and run `docker compose -f compose/docker-compose.yml up -d`. Open `http://<agent-vm>:8080`.
 
 Grafana: `http://<any-node>:30000` (user `admin`, password `admin`). Prometheus: `http://<any-node>:30090`.
@@ -97,7 +98,7 @@ Kolla Prometheus exporters (node, libvirt, openstack-exporter) are a later chang
 
 Flux applies `gitops/`. The cluster holds collectors and RBAC only:
 
-- `namespace.yaml` — `aiops`, `monitoring`, ServiceAccount `mcp-infra`, a token Secret, ClusterRole that can get/list pods and delete pods
+- `namespace.yaml` — `token-for-agent`, `monitoring`, ServiceAccount `k8s-cluster-openstack`, a token Secret, ClusterRole that can get/list pods and delete pods
 - `monitoring.yaml` — kube-prometheus-stack, NodePorts 30090 / 30000, Alertmanager webhook
 - `alerts.yaml` — `MemoryBreachSoon` (`predict_linear` of `container_memory_working_set_bytes`) and `MemoryNearLimit`
 
@@ -105,9 +106,9 @@ The agent Deployments are not here. They run in `compose/`.
 
 ## Agent VM
 
-`compose/docker-compose.yml` starts the two MCP servers (Streamable HTTP at `/mcp`) and the Spring app (Spring AI 1.1). `restart_pod` refuses `kube-system`, pods with no owner, namespaces outside `RESTART_NAMESPACES` when that list is set, and a second delete of the same pod during `RESTART_COOLDOWN_SECONDS` (default 300). Each accepted delete writes one log line.
+`compose/docker-compose.yml` starts `k8s-container-metrics` and `k8s-cluster-openstack` (Streamable HTTP at `/mcp`) and the Spring app (Spring AI 1.1). `restart_pod` refuses `kube-system`, pods with no owner, namespaces outside `RESTART_NAMESPACES` when that list is set, and a second delete of the same pod during `RESTART_COOLDOWN_SECONDS` (default 300). Each accepted delete writes one log line.
 
-Ollama on the CentOS GPU: set `OPENAI_BASE_URL=http://<centos>:11434`, `OPENAI_API_KEY=ollama`, and a tool-capable model such as `qwen2.5:7b`.
+OpenRouter needs no credit card. Copy `compose/.env.example`: `OPENAI_BASE_URL=https://openrouter.ai/api` (Spring adds `/v1/chat/completions`, so do not put `/v1` in the base), a key from openrouter.ai, and `OPENAI_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free`. That model accepts tool calls. Free models share about 50 requests a day, and the NVIDIA free endpoint may log prompts, so keep secrets out of the chat. The CentOS GPU stays available: `OPENAI_BASE_URL=http://<centos>:11434`, `OPENAI_API_KEY=ollama`, model `qwen2.5:7b`.
 
 ## What is not in this repo
 

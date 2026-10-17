@@ -1,6 +1,7 @@
 package com.aboubakertounli.aiops;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,8 +23,8 @@ public class ChatController {
     public ChatController(AgentService agentService,
                           AlertInbox alertInbox,
                           @Value("${spring.ai.openai.base-url:https://api.openai.com}") String baseUrl,
-                          @Value("${spring.ai.mcp.client.streamable-http.connections.metrics.url}") String metricsUrl,
-                          @Value("${spring.ai.mcp.client.streamable-http.connections.infra.url}") String infraUrl) {
+                          @Value("${spring.ai.mcp.client.streamable-http.connections.k8s-container-metrics.url}") String metricsUrl,
+                          @Value("${spring.ai.mcp.client.streamable-http.connections.k8s-cluster-openstack.url}") String infraUrl) {
         this.agentService = agentService;
         this.alertInbox = alertInbox;
         this.baseUrl = baseUrl;
@@ -41,7 +42,9 @@ public class ChatController {
         return new AgentInfo(
                 agentService.model(),
                 baseUrl,
-                List.of(new AgentInfo.McpServer("metrics", metricsUrl), new AgentInfo.McpServer("infra", infraUrl))
+                List.of(
+                        new AgentInfo.McpServer("k8s-container-metrics", metricsUrl),
+                        new AgentInfo.McpServer("k8s-cluster-openstack", infraUrl))
         );
     }
 
@@ -66,7 +69,8 @@ public class ChatController {
     }
 
     @DeleteMapping("/api/conversations/{conversationId}")
-    public void clear(@PathVariable String conversationId) {
+    public ResponseEntity<Void> clear(@PathVariable String conversationId) {
         agentService.clear(conversationId);
+        return ResponseEntity.noContent().build();
     }
 }

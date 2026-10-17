@@ -1,0 +1,113 @@
+<div class="desk">
+  <header class="mast">
+    <div class="brand">
+      <span class="lamp" [class.on]="online()" [class.busy]="busy()" aria-hidden="true"></span>
+      <div>
+        <p class="eyebrow">AIOps · fourth VM · restart only</p>
+        <h1>Signal desk</h1>
+      </div>
+    </div>
+    <div class="mast-meta">
+      <p class="status" [class.down]="!online()">{{ status() }}</p>
+      <time [attr.datetime]="clock()">{{ clock() }}</time>
+      <p class="model" [title]="model() + ' · ' + baseUrl()">{{ model() }}</p>
+    </div>
+  </header>
+
+  <aside aria-label="Instruments">
+    <section class="plate route">
+      <p class="kicker">Route</p>
+      <ol>
+        <li><span>Master</span><small>API only</small></li>
+        <li><span>Workers</span><small>the application</small></li>
+        <li class="here"><span>This desk</span><small>beside the cluster</small></li>
+      </ol>
+    </section>
+
+    <section class="plate">
+      <p class="kicker">Instruments</p>
+      @for (server of servers(); track server.name) {
+        <article>
+          <h2>{{ server.name }}</h2>
+          <p>{{ server.blurb }}</p>
+          <code>{{ server.url }}</code>
+        </article>
+      } @empty {
+        <p class="quiet">The two MCP names show up when the agent answers.</p>
+      }
+    </section>
+
+    <section class="plate">
+      <p class="kicker">Last call from Alertmanager</p>
+      @if (alert()?.received) {
+        <p class="when">{{ when(alert()?.at ?? null) }}</p>
+        <p class="alert-copy">{{ alert()?.reply }}</p>
+      } @else {
+        <p class="quiet">Nothing has fired into this desk yet. A rising line that stays under the hour-ahead threshold does not call.</p>
+      }
+    </section>
+
+    <section class="plate asks">
+      <p class="kicker">Ask</p>
+      @for (prompt of prompts; track prompt.kicker) {
+        <button type="button" (click)="send(prompt.text)" [disabled]="busy()">
+          <span>{{ prompt.kicker }}</span>
+          {{ prompt.label }}
+        </button>
+      }
+      <button type="button" class="ghost" (click)="clear()">Clear this tape</button>
+    </section>
+  </aside>
+
+  <main>
+    @if (loadError()) {
+      <div class="banner" role="alert">
+        <p>{{ loadError() }}</p>
+        <button type="button" (click)="refresh()">Try again</button>
+      </div>
+    }
+
+    <div class="tape" #tape aria-live="polite">
+      @if (turns().length === 0) {
+        <div class="empty">
+          <p class="eyebrow">The tape is blank</p>
+          <h2>Ask about a pod, or wait for the webhook.</h2>
+          <p>The model may delete one owned pod. It cannot edit a manifest, scale a node, or touch kube-system.</p>
+        </div>
+      }
+      @for (turn of turns(); track turn.id) {
+        <article class="turn" [class.you]="turn.role === 'you'" [class.failed]="turn.failed">
+          <p class="who">{{ turn.role === 'you' ? 'You' : 'Desk' }}</p>
+          <p class="copy">{{ turn.text }}</p>
+          @if (turn.tools.length) {
+            <div class="ledger">
+              @for (tool of turn.tools; track tool.name) {
+                <details>
+                  <summary>{{ tool.name }}</summary>
+                  <pre>{{ pretty(tool.arguments) }}</pre>
+                  <pre class="result">{{ pretty(tool.result) }}</pre>
+                </details>
+              }
+            </div>
+          }
+        </article>
+      }
+      @if (busy()) {
+        <p class="working">Checking metrics, logs, and the compute host before it answers.</p>
+      }
+    </div>
+
+    <form class="composer" [class.busy]="busy()" (submit)="onSubmit($event)">
+      <label class="sr" for="ask">Message the desk</label>
+      <textarea
+        id="ask"
+        rows="2"
+        [value]="draft()"
+        (input)="onDraft($event)"
+        (keydown)="onKey($event)"
+        placeholder="Which pod, which node, what changed?"
+      ></textarea>
+      <button type="submit" [disabled]="busy() || draft().trim().length === 0">Send</button>
+    </form>
+  </main>
+</div>

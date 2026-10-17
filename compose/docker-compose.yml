@@ -1,10 +1,10 @@
 # Run on the AIOps-Agent VM, not inside the cluster.
-# Copy a kubeconfig that uses the mcp-infra ServiceAccount to ./kubeconfig
+# Copy a kubeconfig that uses the k8s-cluster-openstack ServiceAccount to ./kubeconfig
 # and point PROMETHEUS_URL at a worker NodePort (30090).
 
 services:
-  mcp-metrics:
-    image: ${MCP_METRICS_IMAGE:-registry.gitlab.com/aboubakertounli/aiops-self-healing-agent/mcp-metrics:latest}
+  k8s-container-metrics:
+    image: ${MCP_CONTAINER_METRICS_IMAGE:-registry.gitlab.com/aboubakertounli/aiops-self-healing-agent/k8s-container-metrics:latest}
     build:
       context: ..
       dockerfile: mcp-server-metrics/Dockerfile
@@ -15,8 +15,8 @@ services:
       - "8002:8002"
     restart: unless-stopped
 
-  mcp-infra:
-    image: ${MCP_INFRA_IMAGE:-registry.gitlab.com/aboubakertounli/aiops-self-healing-agent/mcp-infra:latest}
+  k8s-cluster-openstack:
+    image: ${MCP_CLUSTER_OPENSTACK_IMAGE:-registry.gitlab.com/aboubakertounli/aiops-self-healing-agent/k8s-cluster-openstack:latest}
     build:
       context: ..
       dockerfile: mcp-server-infra/Dockerfile
@@ -41,11 +41,11 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-ollama}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
-      MCP_METRICS_URL: http://mcp-metrics:8002
-      MCP_INFRA_URL: http://mcp-infra:8003
+      MCP_CONTAINER_METRICS_URL: http://k8s-container-metrics:8002
+      MCP_CLUSTER_OPENSTACK_URL: http://k8s-cluster-openstack:8003
     ports:
       - "8080:8080"
     depends_on:
-      - mcp-metrics
-      - mcp-infra
+      - k8s-container-metrics
+      - k8s-cluster-openstack
     restart: unless-stopped

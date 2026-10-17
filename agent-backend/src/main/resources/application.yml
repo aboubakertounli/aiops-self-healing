@@ -3,6 +3,9 @@ spring:
     name: aiops-agent
   ai:
     openai:
+      # OpenRouter: https://openrouter.ai/api and a :free model that supports tools.
+      # Spring appends /v1/chat/completions, so the base URL must not already end in /v1.
+      # Ollama on the CentOS GPU: http://172.16.99.1:11434 with key ollama.
       api-key: ${OPENAI_API_KEY:ollama}
       base-url: ${OPENAI_BASE_URL:https://api.openai.com}
       chat:
@@ -13,11 +16,11 @@ spring:
         type: SYNC
         streamable-http:
           connections:
-            metrics:
-              url: ${MCP_METRICS_URL:http://localhost:8002}
+            k8s-container-metrics:
+              url: ${MCP_CONTAINER_METRICS_URL:http://localhost:8002}
               endpoint: /mcp
-            infra:
-              url: ${MCP_INFRA_URL:http://localhost:8003}
+            k8s-cluster-openstack:
+              url: ${MCP_CLUSTER_OPENSTACK_URL:http://localhost:8003}
               endpoint: /mcp
 
 server:

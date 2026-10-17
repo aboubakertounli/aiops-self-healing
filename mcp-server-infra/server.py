@@ -18,7 +18,7 @@ _LAST_RESTART: dict[str, float] = {}
 _ALLOWLIST = parse_allowlist(os.environ.get("RESTART_NAMESPACES", ""))
 _COOLDOWN = int(os.environ.get("RESTART_COOLDOWN_SECONDS", "300"))
 
-mcp = FastMCP("infra")
+mcp = FastMCP("k8s-cluster-openstack")
 
 
 def _kube():

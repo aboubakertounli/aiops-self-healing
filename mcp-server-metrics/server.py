@@ -9,7 +9,7 @@ from fastmcp import FastMCP
 
 from queries import cpu_query, limit_query, memory_query, predict_query
 
-mcp = FastMCP("metrics")
+mcp = FastMCP("k8s-container-metrics")
 PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://127.0.0.1:30090")
 
 
